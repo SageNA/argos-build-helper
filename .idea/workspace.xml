@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="e3c56861-e79a-4553-9d73-3e750e37b418" name="Default" comment="" />
+    <list default="true" id="e3c56861-e79a-4553-9d73-3e750e37b418" name="Default" comment="">
+      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
+      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/argos-build-helper.rb" afterPath="$PROJECT_DIR$/argos-build-helper.rb" />
+    </list>
     <ignored path="argos-build-helper.iws" />
     <ignored path=".idea/workspace.xml" />
     <option name="TRACKING_ENABLED" value="true" />
@@ -47,7 +50,7 @@
       <file leaf-file-name="argos-build-helper.rb" pinned="false" current="true" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/argos-build-helper.rb">
           <provider selected="true" editor-type-id="text-editor">
-            <state line="14" column="8" selection-start="417" selection-end="417" vertical-scroll-proportion="0.37333333">
+            <state line="10" column="68" selection-start="282" selection-end="282" vertical-scroll-proportion="0.26666668">
               <folding />
             </state>
           </provider>
@@ -421,10 +424,6 @@
           <line>43</line>
         </line-breakpoint>
         <line-breakpoint enabled="true" type="ruby-line">
-          <url>file://$PROJECT_DIR$/argos-build-helper.rb</url>
-          <line>13</line>
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="ruby-line">
           <url>file://$PROJECT_DIR$/lib/docjs/inspectors/inspector.rb</url>
           <line>59</line>
         </line-breakpoint>
@@ -536,7 +535,7 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/argos-build-helper.rb">
       <provider selected="true" editor-type-id="text-editor">
-        <state line="14" column="8" selection-start="417" selection-end="417" vertical-scroll-proportion="0.37333333">
+        <state line="10" column="68" selection-start="282" selection-end="282" vertical-scroll-proportion="0.26666668">
           <folding />
         </state>
       </provider>
