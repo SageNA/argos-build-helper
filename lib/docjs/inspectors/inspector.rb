@@ -13,16 +13,18 @@ module DocJS
       end
 
       def inspect_file(path)
-        process_file(path)
+        process_file(path, path)
       end
 
       def inspect_path(path, recursive = true, &block)
         project = Meta::Project.new(path)
 
-        iterate_path(path, recursive) do |file|
-          next if block_given? && !yield(file)
+        (path.respond_to?(:each) ? path : [path]).each do |item|
+          iterate_path(item, recursive) do |file|
+            next if block_given? && !block.call(file)
 
-          project.files << process_file(file)
+            project.files << process_file(file, item)
+          end
         end
 
         project
@@ -30,10 +32,11 @@ module DocJS
 
       protected
       def iterate_path(path, recursive = true)
+        return if !File.exists?(path)
         Find.find(path) do |file|
           next if file == path
 
-          if FileTest.directory? file
+          if File.directory? file
             throw :prune if !recursive
           else
             yield file
@@ -41,7 +44,7 @@ module DocJS
         end
       end
 
-      def process_file(path)
+      def process_file(path, base_path)
         File.open(path) do |file|
           content = file.read
 
@@ -72,6 +75,23 @@ module DocJS
           ast.accept(visitor)
 
           source_file.modules = visitor.modules
+
+          # create names for anonymous modules
+          absolute_base_path = File.absolute_path base_path
+          absolute_module_path = File.absolute_path path
+          anonymous_module_count = 0
+
+          for module_info in source_file.modules
+            next if !module_info.name.nil?
+
+            if absolute_module_path.index(absolute_base_path) === 0
+              module_info.name = File.basename(absolute_base_path) + "/" + absolute_module_path[(absolute_base_path.length + 1)..-4]
+              module_info.name += (anonymous_module_count + 1).to_s if anonymous_module_count > 0
+            end
+
+            anonymous_module_count += 1
+          end
+
           source_file.classes = visitor.classes
           source_file.functions = visitor.functions
           source_file
