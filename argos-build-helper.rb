@@ -57,7 +57,7 @@ module Argos
 
       is_interesting_file = lambda do |file|
         file_name = File.basename(file).downcase
-        return file_name =~ /\.js$/i
+        return file_name =~ /(?<!uncompressed)\.js/i
       end
 
       inspector = DocJS::Inspectors::DojoAmdInspector.new()
@@ -171,7 +171,7 @@ module Argos
         name_to_file["dijit"] = name_to_file["dijit/lib/main"]
       end
 
-      if @dojo_amd_compatible
+      if @dojo_amd and @dojo_amd_compatible
         # compatible AMD requires a couple of dependency changes since it uses a compatible shim
         # that exposes module stubs (not the real modules)
         # bootstrap >> loader >> host
@@ -194,6 +194,13 @@ module Argos
 
         # since we are in a compatible AMD mode, we do not want the original anonymous dijit module
         name_to_file["dijit/lib/main"] = nil # no file in AMD compatible mode
+      end
+
+      if @dojo_amd and not @dojo_amd_compatible
+        require_module = DocJS::Meta::Module.new("require")
+
+        name_to_module[require_module.name] = require_module
+        name_to_file[require_module.name] = nil
       end
 
       source_projects.each do |key,project|
@@ -229,7 +236,7 @@ def process_command_line
     opt :dojo_path, "dojo path", :type => :string, :short => 'd', :required => true
     opt :dojo_cache, "dojo cache", :type => :string, :short => 'c', :required => false
     opt :dojo_amd, "dojo amd", :type => :bool, :default => true
-    opt :dojo_amd_compatible, "dojo amd compatible", :type => :bool, :default => true
+    opt :dojo_amd_compatible, "dojo amd compatible", :type => :bool, :default => false
     opt :dojo_sizzle, "dojo sizzle", :type => :bool, :default => false # not compatible with AMD right now
   end
 
