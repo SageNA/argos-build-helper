@@ -4,14 +4,23 @@ require 'trollop'
 require_relative 'lib/docjs'
 
 module Argos
+  class ResolverContext
+    attr_accessor :files,
+                  :modules,
+                  :aliases
+
+    def initialize
+      @files = {}
+      @modules = {}
+      @aliases = {}
+    end
+  end
+
   class BuildHelper
     attr_accessor :project_path,
                   :project_aliases,
                   :dojo_path,
                   :dojo_cache,
-                  :dojo_amd,
-                  :dojo_amd_compatible,
-                  :dojo_sizzle,
                   :dojo_is_local
 
     def initialize(options = {})
@@ -19,14 +28,11 @@ module Argos
       @project_aliases = nil
       @dojo_path = nil
       @dojo_cache = nil
-      @dojo_amd = true
-      @dojo_amd_compatible = true
-      @dojo_sizzle = false
-      @dojo_is_local = false
+      @dojo_compilation = nil
 
       options.each {|k,v| instance_variable_set "@#{k}", v} if options.is_a? Hash
 
-      @dojo_is_local =  @project_path.any? do |path|
+      @dojo_is_local = @project_path.any? do |path|
         (File.expand_path(path).downcase == File.expand_path(@dojo_path).downcase)
       end if @project_path
     end
@@ -34,8 +40,7 @@ module Argos
     def load_source_projects
       is_interesting_file = lambda do |file|
         return false if @dojo_is_local && (file =~ /\W+(dojo|dijit|dojox)\W+/i)
-        file_name = File.basename(file).downcase
-        return false if ['loader.js', 'require.js'].include? file_name
+        file_name = File.basename(file)
         return file_name =~ /\.js$/i
       end
 
@@ -56,8 +61,9 @@ module Argos
       end
 
       is_interesting_file = lambda do |file|
-        file_name = File.basename(file).downcase
-        return file_name =~ /(?<!uncompressed)\.js/i
+        file_name = File.basename(file)
+        return false if [].include? file_name
+        return file_name =~ /(?<!uncompressed)\.js$/i
       end
 
       inspector = DocJS::Inspectors::DojoAmdInspector.new()
@@ -71,35 +77,58 @@ module Argos
       project
     end
 
-    def resolve_dependencies_old(mod, lookup)
-      chain = []
-      for import in mod.imports
-        chain << resolve_dependencies(lookup[import], lookup) if lookup[import]
-        chain << import
+    def on_module_not_found(module_name, importing_module, context)
+      raise "Could not find module with name '#{module_name}'." unless module_name =~ /^[\w-]+\?/i
+    end
+
+    def resolve_module(module_name, parent_module, context)
+      print "original: #{module_name}\n"
+      module_path = module_name.split('/')
+
+      if module_path[0] == '.' || module_path[0] == '..'
+        base_name = parent_module.name
+        # root_name = context.aliases.rassoc(base_name)
+        # base_name = root_name[0] unless root_name.nil?
+
+        base_path = base_name.split('/').slice(0..-2)
+
+        module_path.reverse!
+
+        while ((segment = module_path.pop()))
+          case segment
+            when '.' then next
+            when '..' then
+              base_path.pop()
+            else
+              base_path << segment
+          end
+        end
+
+        module_name = base_path.join('/')
       end
-      chain
+      print "resolved: #{module_name}\n"
+      context.modules[module_name] || context.modules[context.aliases[module_name]]
     end
 
-    def on_module_not_found(name)
-      raise "Could not find module with name '#{name}'."
-    end
-
-    def resolve_dependencies(imports, name_to_module)
+    def resolve_dependencies(imports, context)
       module_added = {}
       resolved = []
 
-      visit = lambda do |name,visited|
-        module_info = name_to_module[name]
+      depth = 0
+      visit = lambda do |module_name, parent_module, visited|
 
-        # print "#{depth}: visit: #{name}, actual: #{module_info ? module_info.name : 'none'}, imports: #{module_info ? module_info.imports : 'none'}\n"
+        module_info = resolve_module(module_name, parent_module, context)
 
-        return on_module_not_found(name) if module_info.nil?
+        print "#{depth}: visit: #{module_name}, actual: #{module_info ? module_info.name : 'none'}, imports: #{module_info ? module_info.imports : 'none'}\n"
+
+        return on_module_not_found(module_name, parent_module, context) if module_info.nil?
         return if module_added[module_info.name]
 
         if module_info.imports.length > 0
           visited = {} if visited.nil?
 
           if visited[module_info.name]
+            return
             raise "Circular dependency detected for '#{module_info.name}'."
           end
 
@@ -109,7 +138,9 @@ module Argos
             import_type, import_name = import.split '!'
             import_name = import_type if import_name.nil?
 
-            visit.call(import_name, visited) if visit
+            depth += 1
+            visit.call(import_name, module_info, visited) if visit
+            depth -= 1
           end
         end
 
@@ -123,7 +154,7 @@ module Argos
         import_type, import_name = import.split '!'
         import_name = import_type if import_name.nil?
 
-        visit.call(import_name, nil)
+        visit.call(import_name, nil, nil)
       end
 
       resolved
@@ -133,81 +164,62 @@ module Argos
       source_projects = load_source_projects
       dojo_project = load_dojo_project
 
-      name_to_module = {}
-      name_to_file = {}
+      resolver_context = ResolverContext.new
 
       dojo_project.files.each do |project_file|
-        next if project_file.path =~ /dojo\/_base\/_loader\/loader\.js$/i # always skip (provides stub modules)
-        next if project_file.path =~ /dojo\/lib\/kernel\.js$/i unless not @dojo_amd_compatible
-        next if project_file.path =~ /dojo\/lib\/backCompat\.js$/i unless not @dojo_amd_compatible
-        next if project_file.path =~ /dojo\/_base\/query\.js/i unless not @dojo_sizzle
-        next if project_file.path =~ /dojo\/_base\/query-sizzle\.js/i unless @dojo_sizzle
-
         project_file.modules.each do |module_info|
-          if name_to_module[module_info.name]
-            # todo: find conflicts for kernel and main-browser
+          # ignore all "compilations" unless explicitly allowed
+          next if project_file.modules.length > 1 unless @dojo_compilation.include?(File.basename(project_file.path))
+
+          existing_file = resolver_context.files[module_info.name]
+          existing_module = resolver_context.modules[module_info.name]
+
+          if existing_module.nil?
+            resolver_context.files[module_info.name] = project_file
+            resolver_context.modules[module_info.name] = module_info
+          elsif project_file.modules.length >= existing_file.modules.length
+            resolver_context.files[module_info.name] = project_file
+            resolver_context.modules[module_info.name] = module_info
+          else
             print "*** conflict ***\n"
             print "existing:\n"
-            print "\tname: #{name_to_module[module_info.name].name}\n"
-            print "\tfile: #{name_to_file[module_info.name].path}\n"
-            print "\tmods: %s\n" % name_to_file[module_info.name].modules.map {|mod| mod.name}.join(',')
+            print "\tname: #{existing_module.name}\n"
+            print "\tfile: #{existing_file.path}\n"
+            print "\tmods: %s\n" % existing_file.modules.map {|mod| mod.name}.join(',')
             print "new:\n"
             print "\tname: #{module_info.name}\n"
             print "\tfile: #{project_file.path}\n"
             print "\tmods: %s\n" % project_file.modules.map {|mod| mod.name}.join(',')
             print "******\n"
-            next
           end
-
-          name_to_module[module_info.name] = module_info
-          name_to_file[module_info.name] = project_file
         end
       end
 
-      if @dojo_amd
-        # the dijit module (dijit/lib/main.js) is an anonymous module
-        # re-associate it appropriately (an AMD loader would do this)
-        name_to_module["dijit"] = name_to_module["dijit/lib/main"]
-        name_to_file["dijit"] = name_to_file["dijit/lib/main"]
-      end
+      resolver_context.modules['require'] = DocJS::Meta::Module.new('require')
+      resolver_context.files['require'] = nil
 
-      if @dojo_amd and @dojo_amd_compatible
-        # compatible AMD requires a couple of dependency changes since it uses a compatible shim
-        # that exposes module stubs (not the real modules)
-        # bootstrap >> loader >> host
-        kernel_module = DocJS::Meta::Module.new("dojo/lib/kernel")
-        kernel_module.imports << "dojo/_base/_loader/hostenv_browser"
-        compat_module = DocJS::Meta::Module.new("dojo/lib/backCompat")
-        compat_module.imports << "dojo/_base/_loader/bootstrap"
-        compat_module.imports << "require"
-        loader_module = DocJS::Meta::Module.new("require")
-        loader_file = dojo_project.files.find {|project_file| project_file.path =~ /dojo\/_base\/_loader\/loader\.js$/i}
+      resolver_context.modules['exports'] = DocJS::Meta::Module.new('exports')
+      resolver_context.files['exports'] = nil
 
-        name_to_module[kernel_module.name] = kernel_module
-        name_to_file[kernel_module.name] = nil # no file in AMD compatible mode
+      resolver_context.modules['module'] = DocJS::Meta::Module.new('module')
+      resolver_context.files['module'] = nil
 
-        name_to_module[compat_module.name] = compat_module
-        name_to_file[compat_module.name] = nil # no file in AMD compatible mode
+      resolver_context.modules['default'] = DocJS::Meta::Module.new('default')
+      resolver_context.files['default'] = nil
 
-        name_to_module[loader_module.name] = loader_module
-        name_to_file[loader_module.name] = loader_file
+      resolver_context.aliases["dojo"] = "dojo/main"
+      resolver_context.aliases["dijit"] = "dijit/main"
+      resolver_context.aliases["dojox"] = "dojox/main"
 
-        # since we are in a compatible AMD mode, we do not want the original anonymous dijit module
-        name_to_file["dijit/lib/main"] = nil # no file in AMD compatible mode
-      end
-
-      if @dojo_amd and not @dojo_amd_compatible
-        require_module = DocJS::Meta::Module.new("require")
-
-        name_to_module[require_module.name] = require_module
-        name_to_file[require_module.name] = nil
+      resolver_context.files.each do |name,project_file|
+        print "#{name} => #{project_file.path}\n" unless project_file.nil?
       end
 
       source_projects.each do |key,project|
         project.files.each do |project_file|
           project_file.modules.each do |module_info|
-            name_to_module[module_info.name] = module_info
-            name_to_file[module_info.name] = project_file
+            resolver_context.files[module_info.name] = project_file
+            resolver_context.modules[module_info.name] = module_info
           end
         end
       end
@@ -220,8 +232,9 @@ module Argos
       end
 
       dojo_imports.flatten!.uniq!
-      dojo_resolved = resolve_dependencies dojo_imports, name_to_module
-      dojo_ordered = dojo_resolved.map {|resolved| name_to_file[resolved]}.select {|project_file| !project_file.nil?}
+      dojo_resolved = resolve_dependencies dojo_imports, resolver_context
+      dojo_ordered = dojo_resolved.map {|resolved| resolver_context.files[resolved]}.select {|project_file| !project_file.nil?}
+      dojo_ordered.uniq!
 
       print "build order:\n"
       dojo_ordered.each {|project_file| print "#{project_file.path}\n"}
@@ -235,14 +248,12 @@ def process_command_line
     opt :project_aliases, "project aliases", :type => :strings, :short => 'a', :required => true
     opt :dojo_path, "dojo path", :type => :string, :short => 'd', :required => true
     opt :dojo_cache, "dojo cache", :type => :string, :short => 'c', :required => false
-    opt :dojo_amd, "dojo amd", :type => :bool, :default => true
-    opt :dojo_amd_compatible, "dojo amd compatible", :type => :bool, :default => false
-    opt :dojo_sizzle, "dojo sizzle", :type => :bool, :default => false # not compatible with AMD right now
+    opt :dojo_compilation, "dojo compilation", :type => :strings, :short => 'w', :required => false
   end
 
+  Trollop::die :dojo_path, "must exist" unless File.exist?(options[:dojo_path])
   Trollop::die :project_path, "must exist" unless options[:project_path].all? {|path| File.exists?(path)}
   Trollop::die :project_aliases, "must exist for each path" unless options[:project_path].length == options[:project_aliases].length
-  Trollop::die :dojo_path, "must exist" unless File.exist?(options[:dojo_path])
 
   options
 end

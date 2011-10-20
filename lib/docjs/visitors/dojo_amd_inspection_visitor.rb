@@ -23,6 +23,14 @@ module DocJS
         true
       end
 
+      def find_ancestor(node, &block)
+        current = node
+        while ((current = current.parent))
+          break if block.call(current)
+        end
+        current
+      end
+
       def create_module_from_node(node)
         result = Meta::Module.new
         result.comment = get_comment_for_node(node.arguments)
@@ -38,6 +46,12 @@ module DocJS
           when 2 then # anonymous module
             factory_node = node.arguments.value[1]
 
+            # see if it's a special dojo release case
+            name_node = find_ancestor(node) {|n| n.is_a?(RKelly::Nodes::PropertyNode)}
+            cache_node = name_node && find_ancestor(name_node) {|n| n.is_a?(RKelly::Nodes::PropertyNode) && n.name == "cache"}
+            require_node = cache_node && find_ancestor(cache_node) {|n| n.is_a?(RKelly::Nodes::FunctionCallNode) && n.value.value == "require"}
+
+            result.name = remove_quotes(name_node.name) unless require_node.nil?
             result.imports = get_value_for_node(node.arguments.value[0])
           when 1 then # anonymous, no dependencies
             factory_node = node.arguments.value[0]
