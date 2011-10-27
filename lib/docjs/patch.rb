@@ -1,6 +1,15 @@
 require 'rkelly'
 
 module RKelly
+  module Patch
+    def self.silent_warnings
+      previous, $VERBOSE = $VERBOSE, nil
+      yield
+    ensure
+      $VERBOSE = previous
+    end
+  end
+
   module Visitors
     class EnumerableVisitor < Visitor
       def visit_DotAccessorNode(o)
@@ -44,7 +53,10 @@ module RKelly
   end
 
   class Parser
-    TOKENIZER = PatchedTokenizer.new
+
+    Patch::silent_warnings {
+      TOKENIZER = PatchedTokenizer.new
+    }
 
     private
     def apply_comments(ast)
