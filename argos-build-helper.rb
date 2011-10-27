@@ -1,6 +1,8 @@
 $:.unshift './lib' # force use of local rkelly
 
 require 'trollop'
+require 'json'
+require 'pathname'
 require_relative 'lib/docjs'
 
 module Argos
@@ -17,20 +19,12 @@ module Argos
   end
 
   class BuildHelper
-    attr_accessor :project_path,
-                  :project_aliases,
-                  :dojo_path,
-                  :dojo_cache,
-                  :dojo_is_local
+    attr_accessor :base_path,
+                  :config
 
-    def initialize(options = {})
-      @project_path = nil
-      @project_aliases = nil
-      @dojo_path = nil
-      @dojo_cache = nil
-      @dojo_compilation = nil
-
-      options.each {|k,v| instance_variable_set "@#{k}", v} if options.is_a? Hash
+    def initialize(path, config)
+      @path = Pathname.new(path || ".")
+      @config = config
 
       @dojo_is_local = @project_path.any? do |path|
         (File.expand_path(path).downcase == File.expand_path(@dojo_path).downcase)
@@ -38,6 +32,10 @@ module Argos
     end
 
     def load_source_projects
+      dojo_is_local = @project_path.any? do |path|
+        (File.expand_path(path).downcase == File.expand_path(@dojo_path).downcase)
+      end if @project_path
+
       is_interesting_file = lambda do |file|
         return false if @dojo_is_local && (file =~ /\W+(dojo|dijit|dojox)\W+/i)
         file_name = File.basename(file)
@@ -54,8 +52,8 @@ module Argos
     end
 
     def load_dojo_project
-      if @dojo_cache && File.exists?(@dojo_cache)
-        return File.open(@dojo_cache) do |file|
+      if @config["dojoCache"] && File.exists?(@path + @config["dojoCache"])
+        return File.open(@path + @config["dojoCache"]) do |file|
           Marshal::load(file)
         end
       end
@@ -67,7 +65,7 @@ module Argos
       end
 
       inspector = DocJS::Inspectors::DojoAmdInspector.new()
-      project = inspector.inspect_path(['dojo', 'dijit', 'dojox'].map {|path| "#{@dojo_path}/#{path}"}, true, &is_interesting_file)
+      project = inspector.inspect_path(["dojo", "dijit", "dojox"].map {|path| "#{@dojo_path}/#{path}"}, true, &is_interesting_file)
 
       if @dojo_cache
         File.open(@dojo_cache, 'w') do |io|
@@ -82,14 +80,10 @@ module Argos
     end
 
     def resolve_module(module_name, parent_module, context)
-      print "original: #{module_name}\n"
       module_path = module_name.split('/')
 
       if module_path[0] == '.' || module_path[0] == '..'
         base_name = parent_module.name
-        # root_name = context.aliases.rassoc(base_name)
-        # base_name = root_name[0] unless root_name.nil?
-
         base_path = base_name.split('/').slice(0..-2)
 
         module_path.reverse!
@@ -106,11 +100,11 @@ module Argos
 
         module_name = base_path.join('/')
       end
-      print "resolved: #{module_name}\n"
+
       context.modules[module_name] || context.modules[context.aliases[module_name]]
     end
 
-    def resolve_dependencies(imports, context)
+    def resolve_dependencies(imports, context, &include)
       module_added = {}
       resolved = []
 
@@ -119,17 +113,18 @@ module Argos
 
         module_info = resolve_module(module_name, parent_module, context)
 
-        print "#{depth}: visit: #{module_name}, actual: #{module_info ? module_info.name : 'none'}, imports: #{module_info ? module_info.imports : 'none'}\n"
+        # print "#{depth}: visit: #{module_name}, actual: #{module_info ? module_info.name : 'none'}, imports: #{module_info ? module_info.imports : 'none'}\n"
 
         return on_module_not_found(module_name, parent_module, context) if module_info.nil?
+        return if block_given? && !include.call(module_name, module_info, parent_module, context)
         return if module_added[module_info.name]
 
         if module_info.imports.length > 0
           visited = {} if visited.nil?
 
           if visited[module_info.name]
+            # raise "Circular dependency detected for '#{module_info.name}'."
             return
-            raise "Circular dependency detected for '#{module_info.name}'."
           end
 
           visited[module_info.name] = true
@@ -211,10 +206,6 @@ module Argos
       resolver_context.aliases["dijit"] = "dijit/main"
       resolver_context.aliases["dojox"] = "dojox/main"
 
-      resolver_context.files.each do |name,project_file|
-        print "#{name} => #{project_file.path}\n" unless project_file.nil?
-      end
-
       source_projects.each do |key,project|
         project.files.each do |project_file|
           project_file.modules.each do |module_info|
@@ -224,6 +215,29 @@ module Argos
         end
       end
 
+      resolver_context.files.each do |name,project_file|
+        print "#{name} => #{project_file.path}\n" unless project_file.nil?
+      end
+
+      dojo_imports = []
+      source_projects.each do |key,project|
+        dojo_imports << project.modules.flat_map {|mod|
+          mod.imports.select {|import| import =~ /^(dojo|dijit|dojox)(\W+|$)/i} unless mod.imports.nil?
+        }
+      end
+
+      # dojo_imports.flatten!.uniq!
+      # dojo_resolved = resolve_dependencies dojo_imports, resolver_context
+      # dojo_dependencies = dojo_resolved.map {|name| resolver_context.files[name]}.select {|file| !file.nil?}.uniq
+
+      # print "build order:\n"
+      # dojo_dependencies.each {|project_file| print "#{project_file.path}\n"}
+
+      result = create_build_package File.dirname(@output_path[0]), source_projects['argos-sdk'], resolver_context
+      create_dojo_package source_projects, resolver_context
+    end
+
+    def create_build_projects(source_projects, dojo_project, resolver_context)
       dojo_imports = []
       source_projects.each do |key,project|
         dojo_imports << project.modules.flat_map {|mod|
@@ -233,25 +247,85 @@ module Argos
 
       dojo_imports.flatten!.uniq!
       dojo_resolved = resolve_dependencies dojo_imports, resolver_context
-      dojo_ordered = dojo_resolved.map {|resolved| resolver_context.files[resolved]}.select {|project_file| !project_file.nil?}
-      dojo_ordered.uniq!
+      dojo_dependencies = dojo_resolved.map {|name| resolver_context.files[name]}.select {|file| !file.nil?}.uniq
+      dojo_dependencies_added = false
+
+      for project_name, source_project in source_projects
+        template_path = "templates/#{project_name}.jsb2"
+
+        next unless File.exists? template_path
+
+        build_project = JSON.parse(File.read(template_path))
+
+        print build_project
+      end
+    end
+
+    def create_build_package(path, project, resolver_context)
+      modules = Hash[*project.modules.flat_map {|info| [info.name, info]}.flatten]
+      resolved = resolve_dependencies(modules.keys, resolver_context) {|name,info| modules[info.name]}
+      ordered = resolved.map {|name| resolver_context.files[name]}.select {|file| !file.nil?}.uniq
+
+      base_path = Pathname.new(path)
+      includes = []
+
+      for project_file in ordered
+        include_path = Pathname.new(File.dirname(project_file.path))
+        includes << {
+            "text" => File.basename(project_file.path),
+            "path" => include_path.relative_path_from(base_path)
+        }
+      end
+
+      # print "build order for #{project.name}:\n"
+      # ordered.each {|project_file| print "#{project_file.path}\n"}
+
+      # {
+      #	name: 'SalesLogix Mobile',
+      #	file: 'content/javascript/argos-saleslogix.js',
+      #	isDebug: true,
+      #	fileIncludes: [{
+      #          text: 'Environment.js',
+      #          path: '../src/'
+      #      }
+
+
+
+      {
+        "name" => "test",
+        "file" => "test.js",
+        "isDebug" => true,
+        "fileIncludes" => includes
+      }
+    end
+
+    def create_dojo_package(source_projects, resolver_context)
+      modules = source_projects.values.flat_map {|project|
+        project.modules.flat_map {|info|
+          (info.imports && info.imports.select {|import| import =~ /^(dojo|dijit|dojox)(\W+|$)/i}) || []
+        }
+      }.uniq
+
+      resolved = resolve_dependencies modules, resolver_context
+      ordered = resolved.map {|name| resolver_context.files[name]}.select {|file| !file.nil?}.uniq
 
       print "build order:\n"
-      dojo_ordered.each {|project_file| print "#{project_file.path}\n"}
+      ordered.each {|project_file| print "#{project_file.path}\n"}
     end
   end
 end
 
 def process_command_line
   options = Trollop::options do
-    opt :project_path, "project path", :type => :strings, :short => 'p', :required => true
-    opt :project_aliases, "project aliases", :type => :strings, :short => 'a', :required => true
-    opt :dojo_path, "dojo path", :type => :string, :short => 'd', :required => true
-    opt :dojo_cache, "dojo cache", :type => :string, :short => 'c', :required => false
-    opt :dojo_compilation, "dojo compilation", :type => :strings, :short => 'w', :required => false
+    opt :output_path, "output path", :type => :strings, :short => "o", :required => true
+    opt :project_path, "project path", :type => :strings, :short => "p", :required => true
+    opt :project_aliases, "project aliases", :type => :strings, :short => "a", :required => true
+    opt :dojo_path, "dojo path", :type => :string, :short => "d", :required => true
+    opt :dojo_cache, "dojo cache", :type => :string, :short => "c", :required => false
+    opt :dojo_compilation, "dojo compilation", :type => :strings, :short => "w", :required => false
   end
 
-  Trollop::die :dojo_path, "must exist" unless File.exist?(options[:dojo_path])
+  Trollop::die :dojo_path, "must exist" unless File.exist? options[:dojo_path]
   Trollop::die :project_path, "must exist" unless options[:project_path].all? {|path| File.exists?(path)}
   Trollop::die :project_aliases, "must exist for each path" unless options[:project_path].length == options[:project_aliases].length
 
