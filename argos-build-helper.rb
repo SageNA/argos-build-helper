@@ -209,10 +209,6 @@ module Argos
         end
       end
 
-      resolver_context.files.each do |name,project_file|
-        print "#{name} => #{project_file.path}\n" unless project_file.nil?
-      end
-
       dojo_imports = []
       source_projects.each do |key,project|
         dojo_imports << project.modules.flat_map {|mod|
