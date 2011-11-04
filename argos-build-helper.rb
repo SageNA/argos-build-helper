@@ -1,3 +1,19 @@
+#!/usr/bin/ruby
+#
+# Copyright (c) 2010, Sage Software, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 $:.unshift './lib' # force use of local rkelly
 
 require 'trollop'
@@ -28,8 +44,8 @@ module Argos
     end
 
     def load_source_projects
-      dojo_is_local = @config["projects"].map {|project| project["path"]}.any? do |path|
-        (File.expand_path(@base_path + path).downcase == File.expand_path(@base_path + @config["dojoPath"]).downcase)
+      dojo_is_local = @config[:projects].map {|project| project[:path]}.any? do |path|
+        (File.expand_path(@base_path + path).downcase == File.expand_path(@base_path + @config[:dojoPath]).downcase)
       end
 
       is_interesting_file = lambda do |file|
@@ -40,17 +56,17 @@ module Argos
 
       projects = {}
 
-      @config["projects"].each do |project|
+      @config[:projects].each do |project|
         inspector = DocJS::Inspectors::DojoAmdInspector.new()
-        projects[project["alias"]] = inspector.inspect_path(@base_path + project["path"], true, &is_interesting_file)
+        projects[project[:alias]] = inspector.inspect_path(@base_path + project[:path], true, &is_interesting_file)
       end
 
       projects
     end
 
     def load_dojo_project
-      dojo_path = @base_path + @config["dojoPath"]
-      dojo_cache = @base_path + @config["dojoCache"] if @config["dojoCache"]
+      dojo_path = @base_path + @config[:dojoPath]
+      dojo_cache = @base_path + @config[:dojoCache] if @config[:dojoCache]
 
       return File.open(dojo_cache) {|file| Marshal::load(file)} if dojo_cache && File.exists?(dojo_cache)
 
@@ -152,7 +168,7 @@ module Argos
       source_projects = load_source_projects
       dojo_project = load_dojo_project
 
-      dojo_compilation = @config["dojoCompilation"] || []
+      dojo_compilation = @config[:dojoCompilation] || []
       resolver_context = ResolverContext.new
 
       dojo_project.files.each do |project_file|
@@ -184,17 +200,17 @@ module Argos
         end
       end
 
-      resolver_context.modules['require'] = DocJS::Meta::Module.new('require')
-      resolver_context.files['require'] = nil
+      resolver_context.modules["require"] = DocJS::Meta::Module.new("require")
+      resolver_context.files["require"] = nil
 
-      resolver_context.modules['exports'] = DocJS::Meta::Module.new('exports')
-      resolver_context.files['exports'] = nil
+      resolver_context.modules["exports"] = DocJS::Meta::Module.new("exports")
+      resolver_context.files["exports"] = nil
 
-      resolver_context.modules['module'] = DocJS::Meta::Module.new('module')
-      resolver_context.files['module'] = nil
+      resolver_context.modules["module"] = DocJS::Meta::Module.new("module")
+      resolver_context.files["module"] = nil
 
-      resolver_context.modules['default'] = DocJS::Meta::Module.new('default')
-      resolver_context.files['default'] = nil
+      resolver_context.modules["default"] = DocJS::Meta::Module.new("default")
+      resolver_context.files["default"] = nil
 
       resolver_context.aliases["dojo"] = "dojo/main"
       resolver_context.aliases["dijit"] = "dijit/main"
@@ -220,16 +236,16 @@ module Argos
     end
 
     def create_build_projects(source_projects, resolver_context)
-      for project in @config["projects"]
-        template_path = @base_path + project["templatePath"]
-        output_path = @base_path + project["outputPath"]
+      for project in @config[:projects]
+        template_path = @base_path + project[:templatePath]
+        output_path = @base_path + project[:outputPath]
 
         next unless File.exists? template_path
 
         build_project = JSON.parse(File.read(template_path))
 
-        build_project["pkgs"] << create_build_package(project, source_projects[project["alias"]], resolver_context)
-        build_project["pkgs"] << create_dojo_package(project, source_projects, resolver_context) if project["includeDojo"]
+        build_project[:pkgs] << create_build_package(project, source_projects[project[:alias]], resolver_context)
+        build_project[:pkgs] << create_dojo_package(project, source_projects, resolver_context) if project[:includeDojo]
 
         File.open(output_path, 'w') do |file|
           file.write(JSON.pretty_generate(build_project))
@@ -242,22 +258,22 @@ module Argos
       resolved = resolve_dependencies(modules.keys, resolver_context) {|name,info| modules[info.name]}
       ordered = resolved.map {|name| resolver_context.files[name]}.select {|file| !file.nil?}.uniq
 
-      package_base_path = @base_path + File.dirname(project["outputPath"])
+      package_base_path = @base_path + File.dirname(project[:outputPath])
       package_includes = []
 
       for project_file in ordered
         include_path = Pathname.new(File.dirname(project_file.path))
         package_includes << {
-            "text" => File.basename(project_file.path),
-            "path" => include_path.relative_path_from(package_base_path).to_s
+            :text => File.basename(project_file.path),
+            :path => include_path.relative_path_from(package_base_path).to_s
         }
       end
 
       {
-        "name" => project["name"],
-        "file" => project["deployAs"],
-        "isDebug" => true,
-        "fileIncludes" => package_includes
+        :name => project[:name],
+        :file => project[:deployAs],
+        :isDebug => true,
+        :fileIncludes => package_includes
       }
     end
 
@@ -271,22 +287,22 @@ module Argos
       resolved = resolve_dependencies modules, resolver_context
       ordered = resolved.map {|name| resolver_context.files[name]}.select {|file| !file.nil?}.uniq
 
-      package_base_path = @base_path + File.dirname(project["outputPath"])
+      package_base_path = @base_path + File.dirname(project[:outputPath])
       package_includes = []
 
       for project_file in ordered
         include_path = Pathname.new(File.dirname(project_file.path))
         package_includes << {
-            "text" => File.basename(project_file.path),
-            "path" => include_path.relative_path_from(package_base_path).to_s
+            :text => File.basename(project_file.path),
+            :path => include_path.relative_path_from(package_base_path).to_s
         }
       end
 
       {
-        "name" => project["includeDojo"]["name"],
-        "file" => project["includeDojo"]["deployAs"],
-        "isDebug" => true,
-        "fileIncludes" => package_includes
+        :name => project[:includeDojo][:name],
+        :file => project[:includeDojo][:deployAs],
+        :isDebug => true,
+        :fileIncludes => package_includes
       }
     end
   end
@@ -316,7 +332,7 @@ EOS
 end
 
 options = process_command_line
-config = JSON.parse(File.read(options[:config_path]))
+config = JSON.parse(File.read(options[:config_path]), :symbolize_names => true)
 helper = Argos::BuildHelper.new(options[:base_path], config)
 helper.run
 
