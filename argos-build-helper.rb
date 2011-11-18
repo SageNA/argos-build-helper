@@ -216,6 +216,8 @@ module Argos
       resolver_context.aliases["dijit"] = "dijit/main"
       resolver_context.aliases["dojox"] = "dojox/main"
 
+      # resolver_context.modules["dojo/query"].imports << "dojo/selector/acme" if resolver_context.modules["dojo/query"]
+
       source_projects.each do |key,project|
         project.files.each do |project_file|
           project_file.modules.each do |module_info|
@@ -242,7 +244,7 @@ module Argos
 
         next unless File.exists? template_path
 
-        build_project = JSON.parse(File.read(template_path))
+        build_project = JSON.parse(File.read(template_path),  :symbolize_names => true)
 
         build_project[:pkgs] << create_build_package(project, source_projects[project[:alias]], resolver_context)
         build_project[:pkgs] << create_dojo_package(project, source_projects, resolver_context) if project[:includeDojo]
@@ -284,6 +286,7 @@ module Argos
         }
       }.uniq
 
+      compilation = @config[:dojoCompilation] || []
       resolved = resolve_dependencies modules, resolver_context
       ordered = resolved.map {|name| resolver_context.files[name]}.select {|file| !file.nil?}.uniq
 
@@ -291,6 +294,8 @@ module Argos
       package_includes = []
 
       for project_file in ordered
+        next if compilation.include?(File.basename(project_file.path))
+
         include_path = Pathname.new(File.dirname(project_file.path))
         package_includes << {
             :text => File.basename(project_file.path),

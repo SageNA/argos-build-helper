@@ -17,8 +17,8 @@
         "outputPath": "products/argos-saleslogix/build/release.jsb2",
         "templatePath": "products/argos-saleslogix/build/release-template.jsb2",
         "includeDojo": {
-            "name": "SalesLogix Mobile Dependencies",
-            "deployAs": "content/javascript/argos-dojo-dependencies.js"
+            "name": "SalesLogix Mobile Dojo Dependencies",
+            "deployAs": "content/dojo/dojo-dependencies.js"
         }
     }]
 }
