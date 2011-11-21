@@ -1,0 +1,18 @@
+{
+    "dojoPath":  "argos-sdk/libraries/dojo",
+    "dojoCache": "dojo.cache",
+    "dojoCompilation": ["dojo.js"],
+    "projects": [{
+        "name": "Argos SDK",
+        "path": "argos-sdk/src",
+        "alias": "argos-sdk",
+        "outputPath": false
+    },{
+        "name": "SalesLogix Mobile Sample Module",
+        "path": "products/argos-sample/src",
+        "alias": "argos-sample",
+        "deployAs": "content/javascript/argos-sample.js",
+        "outputPath": "products/argos-sample/build/release.jsb2",
+        "templatePath": "products/argos-sample/build/release-template.jsb2"
+    }]
+}

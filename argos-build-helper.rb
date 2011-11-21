@@ -239,6 +239,8 @@ module Argos
 
     def create_build_projects(source_projects, resolver_context)
       for project in @config[:projects]
+        next unless project[:outputPath]
+
         template_path = @base_path + project[:templatePath]
         output_path = @base_path + project[:outputPath]
 
