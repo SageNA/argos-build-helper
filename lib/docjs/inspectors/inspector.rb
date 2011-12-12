@@ -59,7 +59,7 @@ module DocJS
       end
 
       def process_file(path, base_path)
-        File.open(path) do |file|
+        File.open(path, 'r', :encoding => 'bom|UTF-8') do |file|
           content = file.read
 
           # todo: remove and add logging functionality
